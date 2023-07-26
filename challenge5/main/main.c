@@ -1,7 +1,8 @@
-/* challenge4:
- *  Must respond "I'm The Dude" on the "/bigLebowski" topic when receiving a "who are you man ?" message (you can use any format for the messages (eg: json | xml | ...)).
+/* challenge5: each time a message has been received, write the `The dude abided on {date}` on the eprom.
  *
  * inspired by "examples/protocols/mqtt/tcp" of ESP-IDF
+ * inspired by "examples/protocols/sntp" of ESP-IDF
+ * inspired by "examples/storage/nvs_rw_value" of ESP-IDF
  *
  * Used MQTT broker is "mqtt://public.mqtthq.com" which doesn't need an account
  */
@@ -15,7 +16,10 @@
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
+#include "esp_netif_sntp.h"
+#include "esp_sntp.h"
 #include "nvs_flash.h"
+#include "nvs.h"
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
@@ -28,6 +32,12 @@
 /* doesn't need an account */
 #define BROKER_URL  "mqtt://public.mqtthq.com"
 
+#define SNTP_TIME_SERVER     "pool.ntp.org"
+
+#define DATE_LENGTH          32
+#define BUFFER_LENGTH        64
+#define DATE_NAME            "dude_date"
+
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -37,7 +47,7 @@ static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-static const char *TAG = "challenge4";
+static const char *TAG = "challenge5";
 
 static int s_retry_num = 0;
 
@@ -65,12 +75,73 @@ static void event_handler(void* arg, esp_event_base_t event_base,
     }
 }
 
+static void get_current_date(char *buffer, unsigned int size)
+{
+    time_t now;
+    struct tm timeinfo;
+
+    time(&now);
+    gmtime_r(&now, &timeinfo);
+    strftime(buffer, size, "%c", &timeinfo);
+}
+
+static void obtain_time(void)
+{
+    char date[DATE_LENGTH];
+    int retry = 0;
+    const int retry_count = 15;
+
+    esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG(SNTP_TIME_SERVER);
+    esp_netif_sntp_init(&config);
+    /* first server is logged */
+    ESP_LOGI(TAG, "NTP connected to %s", esp_sntp_getservername(0));
+
+    // wait for time to be set
+    while (esp_netif_sntp_sync_wait(2000 / portTICK_PERIOD_MS) == ESP_ERR_TIMEOUT && ++retry < retry_count) {
+        ESP_LOGI(TAG, "Waiting for system time to be set... (%d/%d)", retry, retry_count);
+    }
+
+    get_current_date(date, sizeof(date));
+    ESP_LOGI(TAG, "GMT: %s", date);
+}
+
+static void save_current_date(void)
+{
+    char date[DATE_LENGTH];
+    char buffer[BUFFER_LENGTH];
+    char last_buffer[BUFFER_LENGTH];
+    esp_err_t err;
+    size_t length;
+
+    get_current_date(date, sizeof(date));
+    snprintf(buffer, sizeof(buffer), "The dude abided on %s", date);
+    ESP_LOGI(TAG, "current message: \"%s\"", buffer);
+
+    nvs_handle_t handle;
+    err = nvs_open("storage", NVS_READWRITE, &handle);
+    if (err == ESP_OK) {
+        length = BUFFER_LENGTH;
+        memset(last_buffer, 0, length);
+        err = nvs_get_str(handle, DATE_NAME, last_buffer, &length);
+        if (err == ESP_OK) {
+          ESP_LOGI(TAG, "last saved message: \"%s\"", last_buffer);
+        }
+
+        err = nvs_set_str(handle, DATE_NAME, buffer);
+        ESP_LOGI(TAG, "nvs_set_str()=%s", (err != ESP_OK) ? "Failed!" : "Done");
+        err = nvs_commit(handle);
+        ESP_LOGI(TAG, "nv_commit()=%s", (err != ESP_OK) ? "Failed!" : "Done");
+        nvs_close(handle);
+    }
+}
+
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
     esp_mqtt_event_handle_t event = event_data;
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
+
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
@@ -98,6 +169,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             msg_id = esp_mqtt_client_publish(client, "/bigLebowski", "I'm The Dude", 0, 0, 0);
             ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
         }
+        save_current_date();
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
@@ -191,6 +263,8 @@ void wifi_init_sta(void)
     } else {
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
+
+    obtain_time();
 
     mqtt_app_start();
 }
