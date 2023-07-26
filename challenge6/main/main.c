@@ -5,14 +5,18 @@
  * inspired by "examples/storage/nvs_rw_value" of ESP-IDF
  * inspired by "examples/system/esp_timer" of ESP-IDF
  *
+ * to obtain current date, a connection to NTP server "pool.ntp.org" is used
+ *
  * Used MQTT broker is "mqtt://public.mqtthq.com" which doesn't need an account
  */
 
 #include <stdio.h>
 #include <string.h>
+
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+
 #include "esp_system.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -20,8 +24,10 @@
 #include "esp_netif_sntp.h"
 #include "esp_sntp.h"
 #include "esp_timer.h"
+
 #include "nvs_flash.h"
 #include "nvs.h"
+
 #include "driver/gpio.h"
 
 #include "lwip/err.h"
@@ -62,6 +68,7 @@ static int s_retry_num = 0;
 
 #define ESP_WIFI_MAXIMUM_RETRY           5
 
+/* event handler to process messages about Wi-Fi */
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
 {
@@ -100,6 +107,8 @@ static void obtain_time(void)
     int retry = 0;
     const int retry_count = 15;
 
+    ESP_LOGI(TAG, "obtain_time() entered");
+
     esp_sntp_config_t config = ESP_NETIF_SNTP_DEFAULT_CONFIG(SNTP_TIME_SERVER);
     esp_netif_sntp_init(&config);
     /* first server is logged */
@@ -112,6 +121,8 @@ static void obtain_time(void)
 
     get_current_date(date, sizeof(date));
     ESP_LOGI(TAG, "GMT: %s", date);
+
+    ESP_LOGI(TAG, "obtain_time() terminated");
 }
 
 static void save_current_date(void)
@@ -163,6 +174,11 @@ static void oneshot_timer_callback(void* arg)
     switch_off_led();
 }
 
+/* this function is called each time we want to switch on the led
+ * it starts a 3-second timer to switch off the led
+ * if this function is called twice before the led has been switched off
+ * we delete the timer before re-creating it
+ */
 static void light_led(void)
 {
     static esp_timer_handle_t timer_handle;
@@ -259,7 +275,7 @@ static void mqtt_app_start(void)
         .broker.address.uri = BROKER_URL,
     };
 
-    ESP_LOGI(TAG, "mqtt_app_start()");
+    ESP_LOGI(TAG, "mqtt_app_start() entered");
 
     esp_log_level_set("*", ESP_LOG_INFO);
     esp_log_level_set("mqtt_client", ESP_LOG_VERBOSE);
@@ -273,10 +289,15 @@ static void mqtt_app_start(void)
     /* The last argument may be used to pass data to the event handler, in this example mqtt_event_handler */
     esp_mqtt_client_register_event(client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
     esp_mqtt_client_start(client);
+
+    ESP_LOGI(TAG, "mqtt_app_start() terminated");
 };
 
-void wifi_init_sta(void)
+/* create the Wi-Fi Station */
+static void wifi_init_sta(void)
 {
+    ESP_LOGI(TAG, "wifi_init_sta() entered");
+
     s_wifi_event_group = xEventGroupCreate();
 
     ESP_ERROR_CHECK(esp_netif_init());
@@ -287,6 +308,7 @@ void wifi_init_sta(void)
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
     ESP_ERROR_CHECK(esp_wifi_init(&cfg));
 
+    /* register some events handlers */
     esp_event_handler_instance_t instance_any_id;
     esp_event_handler_instance_t instance_got_ip;
     ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
@@ -299,7 +321,7 @@ void wifi_init_sta(void)
                                                         &event_handler,
                                                         NULL,
                                                         &instance_got_ip));
-
+    /* connection parameters to AP */
     wifi_config_t wifi_config = {
         .sta = {
             .ssid = CONFIG_ESP_WIFI_SSID,
@@ -310,8 +332,6 @@ void wifi_init_sta(void)
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA) );
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config) );
     ESP_ERROR_CHECK(esp_wifi_start() );
-
-    ESP_LOGI(TAG, "wifi_init_sta finished.");
 
     /* Waiting until either the connection is established (WIFI_CONNECTED_BIT) or connection failed for the maximum
      * number of re-tries (WIFI_FAIL_BIT). The bits are set by event_handler() (see above) */
@@ -333,14 +353,12 @@ void wifi_init_sta(void)
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
 
-    obtain_time();
-
-    mqtt_app_start();
+    ESP_LOGI(TAG, "wifi_init_sta() finished");
 }
 
 void app_main(void)
 {
-    //Initialize NVS
+    /* Initialize Non-Volatile Storage */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
@@ -348,7 +366,11 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     led_configure();
+
     wifi_init_sta();
+
+    obtain_time();
+
+    mqtt_app_start();
 }
