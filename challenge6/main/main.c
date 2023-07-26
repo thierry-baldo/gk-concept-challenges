@@ -33,7 +33,7 @@
 #define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_WPA2_PSK
 
 /* doesn't need an account */
-#define BROKER_URL  "mqtt://public.mqtthq.com"
+#define BROKER_URL           "mqtt://public.mqtthq.com"
 
 #define SNTP_TIME_SERVER     "pool.ntp.org"
 
@@ -243,6 +243,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             ESP_LOGI(TAG, "Last errno string (%s)", strerror(event->error_handle->esp_transport_sock_errno));
 
         }
+        break;
+    case MQTT_EVENT_BEFORE_CONNECT:
+        ESP_LOGI(TAG, "MQTT_EVENT_BEFORE_CONNECT");
         break;
     default:
         ESP_LOGI(TAG, "Other event id:%d", event->event_id);
