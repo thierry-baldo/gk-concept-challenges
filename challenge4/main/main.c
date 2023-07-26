@@ -1,4 +1,5 @@
-/* challenge3: Must connect on distant mqtt broker (eg : broker.hivemq.com)
+/* challenge4:
+ *  Must respond "I'm The Dude" on the "/bigLebowski" topic when receiving a "who are you man ?" message (you can use any format for the messages (eg: json | xml | ...)).
  *
  * inspired by "examples/protocols/mqtt/tcp" of ESP-IDF
  *
@@ -36,7 +37,7 @@ static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-static const char *TAG = "challenge3";
+static const char *TAG = "challenge4";
 
 static int s_retry_num = 0;
 
@@ -68,9 +69,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 {
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
     esp_mqtt_event_handle_t event = event_data;
+    esp_mqtt_client_handle_t client = event->client;
+    int msg_id;
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_CONNECTED");
+        msg_id = esp_mqtt_client_subscribe(client, "/bigLebowski", 0);
+        ESP_LOGI(TAG, "sent subscribe successful, msg_id=%d", msg_id);
         break;
     case MQTT_EVENT_DISCONNECTED:
         ESP_LOGI(TAG, "MQTT_EVENT_DISCONNECTED");
@@ -87,7 +92,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
     case MQTT_EVENT_DATA:
         ESP_LOGI(TAG, "MQTT_EVENT_DATA");
         printf("TOPIC=%.*s\r\n", event->topic_len, event->topic);
+        printf("DATE_LENGTH=%d\r\n", event->data_len);
         printf("DATA=%.*s\r\n", event->data_len, event->data);
+        if (strncmp(event->data, "who are you man ?", event->data_len) == 0) {
+            msg_id = esp_mqtt_client_publish(client, "/bigLebowski", "I'm The Dude", 0, 0, 0);
+            ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+        }
         break;
     case MQTT_EVENT_ERROR:
         ESP_LOGI(TAG, "MQTT_EVENT_ERROR");
