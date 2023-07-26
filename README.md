@@ -1,4 +1,4 @@
-# qk-concept-challenges
+# gk-concept-challenges
 
 This repository contains responses of "GKConcept technical-challenges" of Thierry Baldo
 
