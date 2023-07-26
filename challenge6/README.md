@@ -1,4 +1,6 @@
-# challenge5: each time a message has been received, write the `The dude abided on {date}` on the eprom
+# challenge6: Every third correct messages, light a (big)LED(owski) for 3 seconds
+
+A LED is connected on pin 13, with a 220-ohm resistor
 
 Wi-Fi SSID and Password need to be configured:
 idf.py menuconfig

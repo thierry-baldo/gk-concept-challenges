@@ -1,8 +1,9 @@
-/* challenge5: each time a message has been received, write the `The dude abided on {date}` on the eprom.
+/* challenge6: Every third correct messages, light a (big)LED(owski) for 3 seconds
  *
  * inspired by "examples/protocols/mqtt/tcp" of ESP-IDF
  * inspired by "examples/protocols/sntp" of ESP-IDF
  * inspired by "examples/storage/nvs_rw_value" of ESP-IDF
+ * inspired by "examples/system/esp_timer" of ESP-IDF
  *
  * Used MQTT broker is "mqtt://public.mqtthq.com" which doesn't need an account
  */
@@ -18,8 +19,10 @@
 #include "esp_log.h"
 #include "esp_netif_sntp.h"
 #include "esp_sntp.h"
+#include "esp_timer.h"
 #include "nvs_flash.h"
 #include "nvs.h"
+#include "driver/gpio.h"
 
 #include "lwip/err.h"
 #include "lwip/sys.h"
@@ -38,6 +41,12 @@
 #define BUFFER_LENGTH        64
 #define DATE_NAME            "dude_date"
 
+#define MESSAGE_COUNT_MAX    3
+
+#define LED_PIN              13
+#define LED_ON_DURATION_SEC  3
+#define LED_ON_DURATION_US   (LED_ON_DURATION_SEC * 1000000)
+
 /* FreeRTOS event group to signal when we are connected*/
 static EventGroupHandle_t s_wifi_event_group;
 
@@ -47,7 +56,7 @@ static EventGroupHandle_t s_wifi_event_group;
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 
-static const char *TAG = "challenge5";
+static const char *TAG = "challenge6";
 
 static int s_retry_num = 0;
 
@@ -135,12 +144,62 @@ static void save_current_date(void)
     }
 }
 
+static void switch_on_led(void)
+{
+    ESP_LOGI(TAG, "switch_on_led()");
+    gpio_set_level(LED_PIN, 1);
+}
+
+static void switch_off_led(void)
+{
+    ESP_LOGI(TAG, "switch_off_led()");
+    gpio_set_level(LED_PIN, 0);
+}
+
+static void oneshot_timer_callback(void* arg)
+{
+    ESP_LOGI(TAG, "oneshot_timer_callback()");
+
+    switch_off_led();
+}
+
+static void light_led(void)
+{
+    static esp_timer_handle_t timer_handle;
+
+    ESP_LOGI(TAG, "light_led()");
+    switch_on_led();
+
+    if (timer_handle != NULL) {
+        esp_timer_delete(timer_handle);
+        timer_handle = NULL;
+    }
+
+    const esp_timer_create_args_t oneshot_timer_args = {
+            .callback = &oneshot_timer_callback,
+            .arg = NULL,
+            .name = "led",
+    };
+
+    if (esp_timer_create(&oneshot_timer_args, &timer_handle) == ESP_OK) {
+        esp_timer_start_once(timer_handle, LED_ON_DURATION_US);
+    }
+}
+
+static void led_configure(void)
+{
+    gpio_reset_pin(LED_PIN);
+    gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_level(LED_PIN, 0);
+}
+
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
 {
     ESP_LOGD(TAG, "Event dispatched from event loop base=%s, event_id=%" PRIi32 "", base, event_id);
     esp_mqtt_event_handle_t event = event_data;
     esp_mqtt_client_handle_t client = event->client;
     int msg_id;
+    static int message_count;
 
     switch ((esp_mqtt_event_id_t)event_id) {
     case MQTT_EVENT_CONNECTED:
@@ -168,6 +227,13 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         if (strncmp(event->data, "who are you man ?", event->data_len) == 0) {
             msg_id = esp_mqtt_client_publish(client, "/bigLebowski", "I'm The Dude", 0, 0, 0);
             ESP_LOGI(TAG, "sent publish successful, msg_id=%d", msg_id);
+
+            message_count++;
+            ESP_LOGI(TAG, "message_count=%d", message_count);
+            if (message_count == MESSAGE_COUNT_MAX) {
+                light_led();
+                message_count = 0;
+            }
         }
         save_current_date();
         break;
@@ -280,5 +346,6 @@ void app_main(void)
     ESP_ERROR_CHECK(ret);
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+    led_configure();
     wifi_init_sta();
 }
