@@ -1,3 +1,6 @@
-# challenge1
+# challenge2
 
-Create a Wifi Station
+Must authenticate on a WPA2 Wifi AP.
+
+Wi-Fi SSID and Password need to be configured:
+idf.py menuconfig
